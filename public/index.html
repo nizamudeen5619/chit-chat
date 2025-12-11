@@ -15,14 +15,44 @@
     </div>
     <div class="centered-form">
         <div class="centered-form__box">
-            <h1>Join</h1>
-            <form action="/chat.html">
+            <h1>Chit Chat with Nizam</h1>
+            <form id="join-form" action="/chat.html">
                 <label>Display Name</label>
-                <input type="text" name="username" placeholder="Display Name" required>
+                <input type="text" id="username" name="username" placeholder="Display Name" required>
                 <label>Room</label>
-                <input type="text" name="room" placeholder="Room" required>
+                <input type="text" id="room" name="room" placeholder="Room" required>
                 <button>Join</button>
             </form>
+            <script>
+                // Load saved values from sessionStorage
+                const usernameInput = document.getElementById('username');
+                const roomInput = document.getElementById('room');
+                const joinForm = document.getElementById('join-form');
+
+                // Pre-fill form with saved values if they exist
+                const savedUsername = sessionStorage.getItem('chatUsername');
+                const savedRoom = sessionStorage.getItem('chatRoom');
+
+                if (savedUsername) {
+                    usernameInput.value = savedUsername;
+                }
+                if (savedRoom) {
+                    roomInput.value = savedRoom;
+                }
+
+                // Save values to sessionStorage when form is submitted
+                joinForm.addEventListener('submit', (e) => {
+                    const username = usernameInput.value.trim();
+                    const room = roomInput.value.trim();
+
+                    if (username) {
+                        sessionStorage.setItem('chatUsername', username);
+                    }
+                    if (room) {
+                        sessionStorage.setItem('chatRoom', room);
+                    }
+                });
+            </script>
         </div>
     </div>
 </body>

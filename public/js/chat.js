@@ -6,6 +6,9 @@ const $messageFormInput = $messageForm.querySelector('input')
 const $messageFormButton = $messageForm.querySelector('button')
 const $sendLocationButton = document.querySelector('#share-location')
 const $message = document.querySelector('#message')
+const $sidebar = document.querySelector('#sidebar')
+const $sidebarToggle = document.querySelector('#sidebar-toggle')
+const $sidebarOverlay = document.querySelector('#sidebar-overlay')
 
 //Templates
 const messageTemplate = document.querySelector('#message-template').innerHTML
@@ -95,6 +98,29 @@ $sendLocationButton.addEventListener('click', () => {
             console.log('Location Shared!');
         })
     })
+})
+
+// Sidebar toggle functionality
+$sidebarToggle.addEventListener('click', () => {
+    $sidebar.classList.toggle('active')
+    $sidebarOverlay.classList.toggle('active')
+})
+
+// Close sidebar when clicking overlay
+$sidebarOverlay.addEventListener('click', () => {
+    $sidebar.classList.remove('active')
+    $sidebarOverlay.classList.remove('active')
+})
+
+// Exit button functionality (using event delegation since button is dynamically added)
+$sidebar.addEventListener('click', (e) => {
+    if (e.target.id === 'exit-button' || e.target.closest('#exit-button')) {
+        // Clear session storage
+        sessionStorage.removeItem('chatUsername')
+        sessionStorage.removeItem('chatRoom')
+        // Redirect to index page
+        window.location.href = '/index.html'
+    }
 })
 
 socket.emit('join', { username, room }, (error) => {

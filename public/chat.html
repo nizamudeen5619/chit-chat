@@ -19,6 +19,10 @@
 
 <body>
     <div class="chat">
+        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+            <i class="lni lni-menu"></i>
+        </button>
+        <div id="sidebar-overlay" class="sidebar-overlay"></div>
         <div id="sidebar" class="chat__sidebar">
 
         </div>
@@ -64,6 +68,9 @@
                 <li>{{username}}</li>
             {{/users}}
         </ul>
+        <button id="exit-button" class="exit-button">
+            <i class="lni lni-exit"></i> Exit Chat
+        </button>
     </script>
 
     <script src="/js/chat.js"></script>
