@@ -3,9 +3,26 @@ const mongoose = require('mongoose');
 
 const MONGODB_URL = process.env.MONGODB_URL || 'mongodb://localhost:27017/chit-chat';
 
-mongoose.connect(MONGODB_URL).then(() => {
+// Connection options for MongoDB Atlas
+const connectionOptions = {
+    serverApi: {
+        version: '1',
+        strict: true,
+        deprecationErrors: true,
+    }
+};
+
+// For MongoDB Atlas (mongodb+srv://), use the connection options
+// For local MongoDB, use simpler options
+const isAtlasConnection = MONGODB_URL.startsWith('mongodb+srv://');
+
+mongoose.connect(MONGODB_URL, isAtlasConnection ? connectionOptions : {}).then(() => {
     console.log('Connected to MongoDB');
+    if (isAtlasConnection) {
+        console.log('Using MongoDB Atlas');
+    }
 }).catch((error) => {
-    console.log('Error connecting to MongoDB:', error);
+    console.error('Error connecting to MongoDB:', error);
+    process.exit(1); // Exit process if connection fails
 });
 

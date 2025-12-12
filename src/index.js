@@ -47,8 +47,15 @@ io.on('connection', (socket) => {
         // This prevents saving duplicate join messages when user refreshes alone
         if (usersInRoom.length > 1) {
             const joinMessage = generateMessage('Admin', `${user.username} has joined!`);
+            
+            // Broadcast immediately for real-time notifications
+            // Room state changes should be visible regardless of persistence status
             socket.broadcast.to(user.room).emit('message', joinMessage);
-            await saveMessage(user.room, joinMessage);
+            
+            // Save in background (fire-and-forget) - don't block notifications
+            saveMessage(user.room, joinMessage).catch((error) => {
+                console.error('Failed to save join message (background):', error);
+            });
         }
 
         io.to(user.room).emit('roomData', {
@@ -64,7 +71,7 @@ io.on('connection', (socket) => {
         const filter = new Filter();
 
         if (!user) {
-            return callback(); // user is gone or undefined
+            return callback('User not found');
         }
 
         if (filter.isProfane(message)) {
@@ -72,11 +79,17 @@ io.on('connection', (socket) => {
         }
 
         const messageObj = generateMessage(user.username, message);
+        
+        // Save message to MongoDB first, before broadcasting
+        const saveResult = await saveMessage(user.room, messageObj);
+        
+        if (saveResult.error) {
+            console.error('Failed to save message:', saveResult.error);
+            return callback('Failed to save message. Please try again.');
+        }
+        
+        // Only broadcast if save was successful
         io.to(user.room).emit('message', messageObj);
-        
-        // Save message to MongoDB
-        await saveMessage(user.room, messageObj);
-        
         callback();
     });
 
@@ -84,7 +97,7 @@ io.on('connection', (socket) => {
         const user = getUser(socket.id);
 
         if (!user) {
-            return callback();
+            return callback('User not found');
         }
 
         const locationMessage = generateLocationMessage(
@@ -92,11 +105,16 @@ io.on('connection', (socket) => {
             `https://google.com/maps?q=${latitude},${longitude}`
         );
         
+        // Save location message to MongoDB first, before broadcasting
+        const saveResult = await saveMessage(user.room, locationMessage);
+        
+        if (saveResult.error) {
+            console.error('Failed to save location message:', saveResult.error);
+            return callback('Failed to save location. Please try again.');
+        }
+        
+        // Only broadcast if save was successful
         io.to(user.room).emit('locationMessage', locationMessage);
-        
-        // Save location message to MongoDB
-        await saveMessage(user.room, locationMessage);
-        
         callback();
     });
 
@@ -115,8 +133,15 @@ io.on('connection', (socket) => {
         // This prevents saving duplicate leave messages when user refreshes alone
         if (remainingUsers.length > 0) {
             const leaveMessage = generateMessage('Admin', `${user.username} has left!`);
+            
+            // Broadcast immediately for real-time notifications
+            // Room state changes should be visible regardless of persistence status
             io.to(user.room).emit('message', leaveMessage);
-            await saveMessage(user.room, leaveMessage);
+            
+            // Save in background (fire-and-forget) - don't block notifications
+            saveMessage(user.room, leaveMessage).catch((error) => {
+                console.error('Failed to save leave message (background):', error);
+            });
         }
 
         io.to(user.room).emit('roomData', {
