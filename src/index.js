@@ -53,8 +53,13 @@ io.on('connection', (socket) => {
             socket.broadcast.to(user.room).emit('message', joinMessage);
             
             // Save in background (fire-and-forget) - don't block notifications
-            saveMessage(user.room, joinMessage).catch((error) => {
-                console.error('Failed to save join message (background):', error);
+            saveMessage(user.room, joinMessage).then((result) => {
+                if (result.error) {
+                    console.error('Failed to save join message (background):', result.error);
+                }
+            }).catch((error) => {
+                // This catch handles unexpected promise rejections (shouldn't happen, but safety net)
+                console.error('Unexpected error saving join message (background):', error);
             });
         }
 
@@ -139,8 +144,13 @@ io.on('connection', (socket) => {
             io.to(user.room).emit('message', leaveMessage);
             
             // Save in background (fire-and-forget) - don't block notifications
-            saveMessage(user.room, leaveMessage).catch((error) => {
-                console.error('Failed to save leave message (background):', error);
+            saveMessage(user.room, leaveMessage).then((result) => {
+                if (result.error) {
+                    console.error('Failed to save leave message (background):', result.error);
+                }
+            }).catch((error) => {
+                // This catch handles unexpected promise rejections (shouldn't happen, but safety net)
+                console.error('Unexpected error saving leave message (background):', error);
             });
         }
 
