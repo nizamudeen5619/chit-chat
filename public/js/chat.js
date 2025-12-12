@@ -9,6 +9,7 @@ const $message = document.querySelector('#message')
 const $sidebar = document.querySelector('#sidebar')
 const $sidebarToggle = document.querySelector('#sidebar-toggle')
 const $sidebarOverlay = document.querySelector('#sidebar-overlay')
+const $scrollToBottom = document.querySelector('#scroll-to-bottom')
 
 //Templates
 const messageTemplate = document.querySelector('#message-template').innerHTML
@@ -18,34 +19,76 @@ const sidebarTemplate = document.querySelector('#sidebar-template').innerHTML
 //Options
 const { username, room } = Qs.parse(location.search, { ignoreQueryPrefix: true })
 
-const autoScroll=()=>{
-    //New message Element
-    const $newMessage=$message.lastElementChild
-
-    //Height of the new message
-    const newMessageStyles=getComputedStyle($newMessage)
-    const newmessageMargin=parseInt(newMessageStyles.marginBottom)
-    const newMessageHeight=$newMessage.offsetHeight+newmessageMargin
-
-    //Visible Height(scroll bar)
-    const visibleHeight=$message.offsetHeight
-
-    //height of messages container
-    const containerHeight=$message.scrollHeight
-
-    //How far have I scrolled
-    const scrollOffset=$message.scrollTop+visibleHeight
+// Check if user is at bottom of messages
+const isAtBottom = () => {
+    const threshold = 100 // pixels from bottom to consider "at bottom"
+    const scrollTop = $message.scrollTop
+    const scrollHeight = $message.scrollHeight
+    const clientHeight = $message.clientHeight
     
-    if(containerHeight-newMessageHeight <= scrollOffset){
-        $message.scrollTop=$message.scrollHeight
+    return (scrollHeight - scrollTop - clientHeight) < threshold
+}
+
+// Show or hide scroll to bottom button
+const updateScrollButton = () => {
+    if (isAtBottom()) {
+        $scrollToBottom.classList.remove('visible')
+    } else {
+        $scrollToBottom.classList.add('visible')
     }
 }
+
+const scrollToBottom = () => {
+    $message.scrollTop = $message.scrollHeight
+    updateScrollButton()
+}
+
+const autoScroll = () => {
+    // Only auto-scroll if user is already at bottom
+    if (isAtBottom()) {
+        $message.scrollTop = $message.scrollHeight
+    }
+    updateScrollButton()
+}
+
+// Listen for scroll events to show/hide scroll button
+$message.addEventListener('scroll', updateScrollButton)
+
+// Scroll to bottom button click handler
+$scrollToBottom.addEventListener('click', scrollToBottom)
+
+socket.on('previousMessages', (messages) => {
+    messages.forEach((message) => {
+        if (message.url) {
+            // Location message
+            const html = Mustache.render(locationMessageTemplate, {
+                username: message.username,
+                url: message.url,
+                createdAt: moment(message.createdAt).format('MMM Do YYYY, h:mm a'),
+                isAdmin: message.username.toLowerCase() === 'admin'
+            })
+            $message.insertAdjacentHTML('beforeend', html)
+        } else if (message.text) {
+            // Regular message
+            const html = Mustache.render(messageTemplate, {
+                username: message.username,
+                message: message.text,
+                createdAt: moment(message.createdAt).format('MMM Do YYYY, h:mm a'),
+                isAdmin: message.username.toLowerCase() === 'admin'
+            })
+            $message.insertAdjacentHTML('beforeend', html)
+        }
+    })
+    // Always scroll to bottom when loading previous messages
+    scrollToBottom()
+})
 
 socket.on('message', (message) => {
     const html = Mustache.render(messageTemplate, {
         username: message.username,
         message: message.text,
-        createdAt: moment(message.createdAt).format('MMM Do YYYY, h:mm a')
+        createdAt: moment(message.createdAt).format('MMM Do YYYY, h:mm a'),
+        isAdmin: message.username.toLowerCase() === 'admin'
     })
     $message.insertAdjacentHTML('beforeend', html)
     autoScroll()
@@ -55,9 +98,11 @@ socket.on('locationMessage', (message) => {
     const html = Mustache.render(locationMessageTemplate, {
         username: message.username,
         url: message.url,
-        createdAt: moment(message.createdAt).format('MMM Do YYYY, h:mm a')
+        createdAt: moment(message.createdAt).format('MMM Do YYYY, h:mm a'),
+        isAdmin: message.username.toLowerCase() === 'admin'
     })
     $message.insertAdjacentHTML('beforeend', html)
+    autoScroll()
 })
 
 socket.on('roomData', ({ room, users }) => {

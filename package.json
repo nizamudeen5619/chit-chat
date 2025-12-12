@@ -12,7 +12,9 @@
   "license": "ISC",
   "dependencies": {
     "bad-words": "^3.0.4",
+    "dotenv": "^17.2.3",
     "express": "^4.17.1",
+    "mongoose": "^9.0.1",
     "socket.io": "^4.2.0"
   },
   "devDependencies": {

@@ -17,11 +17,11 @@
         <div class="centered-form__box">
             <h1>Chit Chat with Nizam</h1>
             <form id="join-form" action="/chat.html">
-                <label>Display Name</label>
-                <input type="text" id="username" name="username" placeholder="Display Name" required>
-                <label>Room</label>
-                <input type="text" id="room" name="room" placeholder="Room" required>
-                <button>Join</button>
+                <label for="username">Display Name</label>
+                <input type="text" id="username" name="username" placeholder="Enter your name" required autofocus>
+                <label for="room">Room</label>
+                <input type="text" id="room" name="room" placeholder="Enter room name" required>
+                <button type="submit">Join Chat</button>
             </form>
             <script>
                 // Load saved values from sessionStorage

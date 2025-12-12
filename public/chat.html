@@ -29,6 +29,9 @@
         <div class="chat__main">
             <div id="message" class="chat__messages"></div>
             <div id="locationMessage" class="chat__messages"></div>
+            <button id="scroll-to-bottom" class="scroll-to-bottom" title="Scroll to bottom">
+                <i class="lni lni-arrow-down"></i>
+            </button>
 
             <div class="compose">
                 <form id="msg-form">
@@ -42,21 +45,21 @@
 
 
     <script id="message-template" type="text/html">
-            <div class="message">
+            <div class="message {{#isAdmin}}message--admin{{/isAdmin}}">
                 <p>
                     <span class="message__name">{{username}}</span>
                     <span class="message__meta">{{createdAt}}</span>
                 </p>
-                <p>{{message}}</p>    
+                <p class="message__text">{{message}}</p>    
             </div>
         </script>
     <script id="location-message-template" type="text/html">
-            <div class="message">
+            <div class="message {{#isAdmin}}message--admin{{/isAdmin}}">
                 <p>
                     <span class="message__name">{{username}}</span>
                     <span class="message__meta">{{createdAt}}</span>
                 </p>
-                <p><a href="{{url}}">My Current Location</a></p>    
+                <p class="message__text"><a href="{{url}}" target="_blank">📍 My Current Location</a></p>    
             </div>
     </script>
 
