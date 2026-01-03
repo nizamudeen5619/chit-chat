@@ -34,15 +34,12 @@ const saveMessage = async (roomName, message) => {
                     return { success: true };
                 } else {
                     // Room not found after duplicate key error - unexpected state
-                    console.error('Room not found after duplicate key error:', roomName);
                     return { error: 'Room not found after duplicate key error. Please try again.' };
                 }
             } catch (retryError) {
-                console.error('Error retrying save message:', retryError);
                 return { error: retryError.message };
             }
         }
-        console.error('Error saving message:', error);
         return { error: error.message };
     }
 };
@@ -60,7 +57,6 @@ const getRoomMessages = async (roomName) => {
         
         return { messages: room.messages };
     } catch (error) {
-        console.error('Error getting room messages:', error);
         return { error: error.message };
     }
 };
@@ -76,7 +72,7 @@ const deleteOldRooms = async () => {
         });
         
         if (result.deletedCount > 0) {
-            console.log(`Deleted ${result.deletedCount} room(s) older than 1 week`);
+            // Rooms deleted successfully
         }
         
         return { 
@@ -84,7 +80,6 @@ const deleteOldRooms = async () => {
             deletedCount: result.deletedCount 
         };
     } catch (error) {
-        console.error('Error deleting old rooms:', error);
         return { error: error.message };
     }
 };

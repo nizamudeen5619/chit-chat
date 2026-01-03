@@ -17,12 +17,10 @@ const connectionOptions = {
 const isAtlasConnection = MONGODB_URL.startsWith('mongodb+srv://');
 
 mongoose.connect(MONGODB_URL, isAtlasConnection ? connectionOptions : {}).then(() => {
-    console.log('Connected to MongoDB');
     if (isAtlasConnection) {
-        console.log('Using MongoDB Atlas');
+        // Using MongoDB Atlas
     }
 }).catch((error) => {
-    console.error('Error connecting to MongoDB:', error);
     process.exit(1); // Exit process if connection fails
 });
 

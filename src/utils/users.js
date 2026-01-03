@@ -11,12 +11,12 @@ const addUser = ({ id, username, room }) => {
     }
 
     // Clean data
-    username = username.trim().toLowerCase();
+    username = username.trim();
     room = room.trim().toLowerCase();
 
-    // Check for existing user
+    // Check for existing user (case-insensitive)
     const existingUser = users.find((user) => {
-        return user.room === room && user.username === username;
+        return user.room === room && user.username.toLowerCase() === username.toLowerCase();
     });
 
     // Validate username

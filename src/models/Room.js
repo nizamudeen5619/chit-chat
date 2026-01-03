@@ -6,12 +6,16 @@ const messageSchema = new mongoose.Schema({
         required: true
     },
     text: {
-        type: String,
+        type: mongoose.Schema.Types.Mixed,
         default: null
     },
     url: {
         type: String,
         default: null
+    },
+    isEncrypted: {
+        type: Boolean,
+        default: false
     },
     createdAt: {
         type: Number,
