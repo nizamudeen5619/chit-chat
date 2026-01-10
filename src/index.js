@@ -2,7 +2,7 @@ const express = require('express');
 const socketio = require('socket.io');
 const Filter = require('bad-words');
 const http = require('http');
-const path = require('path');
+const helmet = require('helmet');
 require('./db/mongoose');
 const { generateMessage, generateLocationMessage } = require('./utils/messages');
 const { addUser, removeUser, getUser, getUsersInRoom } = require('./utils/users');
@@ -10,20 +10,51 @@ const { saveMessage, getRoomMessages, deleteOldRooms } = require('./utils/rooms'
 const EncryptionManager = require('./utils/encryption');
 
 const app = express();
+
+// Security middleware
+app.use(helmet());
+
+// Logging middleware
+app.use((req, res, next) => {
+    const timestamp = new Date().toISOString();
+    const method = req.method;
+    const url = req.url;
+    const ip = req.ip || req.connection.remoteAddress;
+    
+    // Log request
+    console.log(`[${timestamp}] ${method} ${url} - IP: ${ip}`);
+    
+    // Log response when sent
+    const originalSend = res.send;
+    res.send = function(data) {
+        const statusCode = res.statusCode;
+        console.log(`[${timestamp}] Response: ${method} ${url} - Status: ${statusCode}`);
+        return originalSend.call(this, data);
+    };
+    
+    next();
+});
+
 const server = http.createServer(app);
-const io = socketio(server); //create new instance
+const io = socketio(server, {
+    // Socket.IO options with logging
+    transports: ['websocket', 'polling'],
+    logLevel: 'debug'
+}); //create new instance
 
 // Store encryption managers per socket
 const socketEncryption = new Map();
 
 const port = process.env.PORT || 3000;
-const publicDirectoryPath = path.join(__dirname, '../public');
-
-app.use(express.static(publicDirectoryPath));
 
 io.on('connection', (socket) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] Socket connected - ID: ${socket.id}`);
 
     socket.on('join', async (options, callback) => {
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] Socket ${socket.id} join event - User: ${options.username}, Room: ${options.room}`);
+        
         const { error, user } = addUser({ id: socket.id, ...options });
 
         if (error) {
@@ -39,6 +70,9 @@ io.on('connection', (socket) => {
             encryption.storeUserPublicKey(user.username, options.publicKey);
             // Store the public key on the socket for later use
             socket.userPublicKey = options.publicKey;
+        } else {
+            // If no public key provided, use the server-generated one
+            socket.userPublicKey = encryption.getPublicKey();
         }
 
         socket.join(user.room);
@@ -84,11 +118,13 @@ io.on('connection', (socket) => {
         // Send existing users' public keys to new user
         usersInRoom.forEach(existingUser => {
             if (existingUser.username !== user.username) {
-                const existingEncryption = socketEncryption.get(existingUser.id);
-                if (existingEncryption) {
+                const existingSocket = Array.from(io.sockets.sockets.values()).find(
+                    s => getUser(s.id)?.id === existingUser.id
+                );
+                if (existingSocket && existingSocket.userPublicKey) {
                     socket.emit('userPublicKey', {
                         username: existingUser.username,
-                        publicKey: existingEncryption.getPublicKey()
+                        publicKey: existingSocket.userPublicKey
                     });
                 }
             }
@@ -116,19 +152,30 @@ io.on('connection', (socket) => {
             users: usersInRoom
         });
 
-        callback();
+        if (typeof callback === 'function') {
+            callback();
+        }
     });
 
     socket.on('sendMessage', async (encryptedMessage, callback) => {
+        const timestamp = new Date().toISOString();
         const user = getUser(socket.id);
+        console.log(`[${timestamp}] Socket ${socket.id} sendMessage event - User: ${user?.username}, Room: ${user?.room}`);
+        
         const encryption = socketEncryption.get(socket.id);
 
         if (!user) {
-            return callback('User not found');
+            if (typeof callback === 'function') {
+                return callback('User not found');
+            }
+            return;
         }
 
         if (!encryption) {
-            return callback('Encryption not initialized');
+            if (typeof callback === 'function') {
+                return callback('Encryption not initialized');
+            }
+            return;
         }
 
         // Store encrypted message as-is
@@ -141,12 +188,17 @@ io.on('connection', (socket) => {
         const saveResult = await saveMessage(user.room, messageObj);
         
         if (saveResult.error) {
-            return callback('Failed to save message. Please try again.');
+            if (typeof callback === 'function') {
+                return callback('Failed to save message. Please try again.');
+            }
+            return;
         }
         
         // Only broadcast if save was successful
         io.to(user.room).emit('message', messageObj);
-        callback();
+        if (typeof callback === 'function') {
+            callback();
+        }
     });
 
     // Handle room key exchange
@@ -173,10 +225,15 @@ io.on('connection', (socket) => {
     });
 
     socket.on('sendLocation', async ({ latitude, longitude }, callback) => {
+        const timestamp = new Date().toISOString();
         const user = getUser(socket.id);
+        console.log(`[${timestamp}] Socket ${socket.id} sendLocation event - User: ${user?.username}, Room: ${user?.room}, Coords: [${latitude}, ${longitude}]`);
 
         if (!user) {
-            return callback('User not found');
+            if (typeof callback === 'function') {
+                return callback('User not found');
+            }
+            return;
         }
 
         const locationMessage = generateLocationMessage(
@@ -193,11 +250,15 @@ io.on('connection', (socket) => {
         
         // Only broadcast if save was successful
         io.to(user.room).emit('locationMessage', locationMessage);
-        callback();
+        if (typeof callback === 'function') {
+            callback();
+        }
     });
 
     socket.on('disconnect', async () => {
+        const timestamp = new Date().toISOString();
         const user = removeUser(socket.id);
+        console.log(`[${timestamp}] Socket disconnected - ID: ${socket.id}, User: ${user?.username}, Room: ${user?.room}`);
 
         // Clean up encryption manager
         socketEncryption.delete(socket.id);
@@ -247,5 +308,6 @@ const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 setInterval(cleanupOldRooms, CLEANUP_INTERVAL);
 
 server.listen(port, () => {
-    // Server started successfully
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] Server started on port ${port}`);
 });
