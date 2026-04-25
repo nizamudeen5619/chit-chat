@@ -3,6 +3,11 @@ const socketio = require('socket.io');
 const Filter = require('bad-words');
 const http = require('http');
 const helmet = require('helmet');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const AuthService = require('./services/AuthService');
+const authRoutes = require('./routes/auth');
+const { authenticateToken } = require('./middleware/auth');
 require('./db/mongoose');
 const { generateMessage, generateLocationMessage } = require('./utils/messages');
 const { addUser, removeUser, getUser, getUsersInRoom } = require('./utils/users');
@@ -13,6 +18,19 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
+
+// CORS middleware
+app.use(cors({
+    origin: "http://localhost:4200",
+    methods: ["GET", "POST"],
+    credentials: true
+}));
+
+// Body parser middleware
+app.use(express.json());
+
+// Routes
+app.use('/api/auth', authRoutes);
 
 // Logging middleware
 app.use((req, res, next) => {
@@ -37,7 +55,11 @@ app.use((req, res, next) => {
 
 const server = http.createServer(app);
 const io = socketio(server, {
-    // Socket.IO options with logging
+    // Socket.IO options with CORS and logging
+    cors: {
+        origin: "http://localhost:4200",
+        methods: ["GET", "POST"]
+    },
     transports: ['websocket', 'polling'],
     logLevel: 'debug'
 }); //create new instance
@@ -51,11 +73,71 @@ io.on('connection', (socket) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] Socket connected - ID: ${socket.id}`);
 
+    // Enhanced authentication middleware for Socket.IO
+    socket.on('authenticate', async (token, callback) => {
+        try {
+            if (!token) {
+                throw new Error('Authentication token required');
+            }
+
+            const decoded = AuthService.verifyAccessToken(token);
+            
+            if (!decoded) {
+                throw new Error('Invalid or expired authentication token');
+            }
+
+            // Additional validation
+            if (decoded.type !== 'access') {
+                throw new Error('Invalid token type');
+            }
+
+            // Attach user info to socket
+            socket.userId = decoded.userId;
+            socket.username = decoded.username;
+            socket.isAuthenticated = true;
+            
+            console.log(`[${timestamp}] Socket ${socket.id} authenticated - User: ${socket.username} (ID: ${socket.userId})`);
+            
+            if (typeof callback === 'function') {
+                callback({ 
+                    success: true, 
+                    user: {
+                        userId: decoded.userId,
+                        username: decoded.username,
+                        email: decoded.email
+                    }
+                });
+            }
+        } catch (error) {
+            console.error(`[${timestamp}] Socket ${socket.id} authentication failed:`, error.message);
+            socket.isAuthenticated = false;
+            
+            if (typeof callback === 'function') {
+                callback({ 
+                    success: false, 
+                    message: error.message || 'Authentication failed' 
+                });
+            }
+        }
+    });
+
     socket.on('join', async (options, callback) => {
         const timestamp = new Date().toISOString();
-        console.log(`[${timestamp}] Socket ${socket.id} join event - User: ${options.username}, Room: ${options.room}`);
         
-        const { error, user } = addUser({ id: socket.id, ...options });
+        // Check if socket is authenticated
+        if (!socket.isAuthenticated || !socket.userId) {
+            console.error(`[${timestamp}] Socket ${socket.id} join attempt without authentication`);
+            return callback('Authentication required');
+        }
+
+        console.log(`[${timestamp}] Socket ${socket.id} join event - User: ${socket.username}, Room: ${options.room}`);
+        
+        const { error, user } = addUser({ 
+            id: socket.userId, 
+            username: socket.username,
+            socketId: socket.id,
+            ...options 
+        });
 
         if (error) {
             return callback(error);
@@ -68,10 +150,10 @@ io.on('connection', (socket) => {
         // Store user's public key and use it for encryption
         if (options.publicKey) {
             encryption.storeUserPublicKey(user.username, options.publicKey);
-            // Store the public key on the socket for later use
+            // Store public key on the socket for later use
             socket.userPublicKey = options.publicKey;
         } else {
-            // If no public key provided, use the server-generated one
+            // If no public key provided, use server-generated one
             socket.userPublicKey = encryption.getPublicKey();
         }
 
@@ -82,7 +164,14 @@ io.on('connection', (socket) => {
         const hasPreviousMessages = !messagesError && messages && messages.length > 0;
         
         if (hasPreviousMessages) {
-            socket.emit('previousMessages', messages);
+            // Decrypt server layer and send client-encrypted messages
+            const decryptedMessages = messages.map(msg => {
+                if (msg.getClientEncryptedContent) {
+                    return msg.getClientEncryptedContent();
+                }
+                return msg.encryptedContent;
+            });
+            socket.emit('previousMessages', decryptedMessages);
         }
 
         // Send welcome message (but don't save it to avoid duplicates on refresh)
@@ -92,17 +181,22 @@ io.on('connection', (socket) => {
         const usersInRoom = getUsersInRoom(user.room);
         
         // Handle room key setup
+        console.log(`[${timestamp}] Users in room: ${usersInRoom.length}`);
         if (usersInRoom.length === 1) {
             // First user in room - generate and store room key
+            console.log(`[${timestamp}] Generating room key for first user`);
             const roomKey = encryption.generateRoomKey();
             encryption.storeRoomKey(user.room, roomKey);
+            console.log(`[${timestamp}] Room key generated, sending to user`);
             
             // Send the room key to the first user so they can store it locally
             setTimeout(() => {
+                console.log(`[${timestamp}] Emitting encryptionReady event`);
                 socket.emit('encryptionReady', { roomKey });
             }, 100);
         } else {
             // Not first user - request room key from existing users
+            console.log(`[${timestamp}] Requesting room key from existing users`);
             socket.broadcast.to(user.room).emit('requestRoomKey', {
                 username: user.username,
                 publicKey: options.publicKey
@@ -130,7 +224,7 @@ io.on('connection', (socket) => {
             }
         });
         
-        // Only emit and save join message if there are other users in the room
+        // Only emit and save join message if there are other users in room
         // This prevents saving duplicate join messages when user refreshes alone
         if (usersInRoom.length > 1) {
             const joinMessage = generateMessage('Admin', `${user.username} has joined!`);
@@ -257,6 +351,8 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', async () => {
         const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] Socket ${socket.id} disconnecting...`);
+        console.log(`[${timestamp}] Current users in array:`, require('./utils/users').users.map(u => ({ id: u.id, username: u.username, room: u.room })));
         const user = removeUser(socket.id);
         console.log(`[${timestamp}] Socket disconnected - ID: ${socket.id}, User: ${user?.username}, Room: ${user?.room}`);
 

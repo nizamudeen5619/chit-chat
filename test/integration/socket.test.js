@@ -1,11 +1,35 @@
 const http = require('http');
 const { Server } = require('socket.io');
 const Client = require('socket.io-client');
+const jwt = require('jsonwebtoken');
 
 // Import the server logic
 const { addUser, removeUser, getUser, getUsersInRoom } = require('../../src/utils/users');
 const { generateMessage, generateLocationMessage } = require('../../src/utils/messages');
 const EncryptionManager = require('../../src/utils/encryption');
+
+// Mock AuthService for testing
+let clientCounter = 0;
+const mockAuthService = {
+  verifyAccessToken: (token) => {
+    try {
+      if (!token || token === 'invalid') {
+        return null;
+      }
+      // Generate unique IDs for each client/socket
+      const clientId = `client-${Date.now()}-${Math.random()}`;
+      // Simple mock decode for test tokens
+      return {
+        userId: clientId,
+        username: 'testuser',
+        email: 'test@example.com',
+        type: 'access'
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+};
 
 describe('Socket.IO Integration Tests', () => {
   let io, serverSocket, clientSocket, clientSocket2;
@@ -21,11 +45,74 @@ describe('Socket.IO Integration Tests', () => {
     
     // Setup server event handlers (similar to main server logic)
     io.on('connection', (socket) => {
+      // Authenticate handler
+      socket.on('authenticate', async (token, callback) => {
+        try {
+          if (!token) {
+            throw new Error('Authentication token required');
+          }
+
+          const decoded = mockAuthService.verifyAccessToken(token);
+          
+          if (!decoded) {
+            throw new Error('Invalid or expired authentication token');
+          }
+
+          if (decoded.type !== 'access') {
+            throw new Error('Invalid token type');
+          }
+
+          socket.userId = decoded.userId;
+          socket.username = decoded.username;
+          socket.isAuthenticated = true;
+
+          if (typeof callback === 'function') {
+            callback({ 
+              success: true, 
+              user: {
+                userId: decoded.userId,
+                username: decoded.username,
+                email: decoded.email
+              }
+            });
+          }
+        } catch (error) {
+          socket.isAuthenticated = false;
+          if (typeof callback === 'function') {
+            callback({ 
+              success: false, 
+              message: error.message || 'Authentication failed' 
+            });
+          }
+        }
+      });
+
       socket.on('join', async (options, callback) => {
-        const { error, user } = addUser({ id: socket.id, ...options });
+        // Check if socket is authenticated
+        if (!socket.isAuthenticated || !socket.userId) {
+          if (typeof callback === 'function') {
+            return callback('Authentication required');
+          }
+          return;
+        }
+
+        // Validate required fields
+        if (!options.room || !socket.username) {
+          if (typeof callback === 'function') {
+            return callback('Username and room are required');
+          }
+          return;
+        }
+
+        const { error, user } = addUser({ 
+          id: socket.userId, 
+          username: socket.username,
+          socketId: socket.id,
+          ...options 
+        });
 
         if (error) {
-          return callback(error);
+          return callback(typeof callback === 'function' ? callback(error) : undefined);
         }
 
         // Initialize encryption manager for this socket
@@ -76,8 +163,9 @@ describe('Socket.IO Integration Tests', () => {
         // Send existing users' public keys to new user
         usersInRoom.forEach(existingUser => {
           if (existingUser.username !== user.username) {
+            // Find the socket for the existing user by matching their userId
             const existingSocket = Array.from(io.sockets.sockets.values()).find(
-              s => getUser(s.id)?.id === existingUser.id
+              s => s.userId === existingUser.id
             );
             if (existingSocket && existingSocket.userPublicKey) {
               socket.emit('userPublicKey', {
@@ -105,7 +193,7 @@ describe('Socket.IO Integration Tests', () => {
       });
 
       socket.on('sendMessage', async (encryptedMessage, callback) => {
-        const user = getUser(socket.id);
+        const user = getUser(socket.userId);
         const encryption = socketEncryption.get(socket.id);
 
         if (!user) {
@@ -135,7 +223,7 @@ describe('Socket.IO Integration Tests', () => {
       });
 
       socket.on('sendLocation', async ({ latitude, longitude }, callback) => {
-        const user = getUser(socket.id);
+        const user = getUser(socket.userId);
 
         if (!user) {
           if (typeof callback === 'function') {
@@ -156,7 +244,7 @@ describe('Socket.IO Integration Tests', () => {
       });
 
       socket.on('disconnect', () => {
-        const user = removeUser(socket.id);
+        const user = removeUser(socket.userId);
 
         // Clean up encryption manager
         socketEncryption.delete(socket.id);
@@ -194,6 +282,9 @@ describe('Socket.IO Integration Tests', () => {
     const { users } = require('../../src/utils/users');
     users.length = 0;
     
+    // Clear socket encryption map from previous tests
+    socketEncryption.clear();
+    
     // Setup client sockets
     clientSocket = new Client(`http://localhost:${port}`);
     clientSocket2 = new Client(`http://localhost:${port}`);
@@ -219,14 +310,34 @@ describe('Socket.IO Integration Tests', () => {
     }
   });
 
+  // Helper function to authenticate before join
+  const authenticateAndJoin = (socket, options, callback) => {
+    socket.emit('authenticate', 'valid-test-token', (authResponse) => {
+      if (authResponse && authResponse.success) {
+        socket.emit('join', options, callback);
+      } else {
+        callback('Authentication failed');
+      }
+    });
+  };
+
   describe('User Connection and Room Management', () => {
     it('should connect clients successfully', (done) => {
       expect(clientSocket.connected).toBe(true);
       done();
     });
 
+    it('should authenticate successfully', (done) => {
+      clientSocket.emit('authenticate', 'valid-test-token', (response) => {
+        expect(response.success).toBe(true);
+        expect(response.user).toBeDefined();
+        expect(response.user.username).toBe('testuser');
+        done();
+      });
+    });
+
     it('should join room successfully', (done) => {
-      clientSocket.emit('join', { 
+      authenticateAndJoin(clientSocket, { 
         username: 'testUser', 
         room: 'testRoom',
         publicKey: 'testPublicKey'
@@ -243,7 +354,7 @@ describe('Socket.IO Integration Tests', () => {
         }
       });
 
-      clientSocket.emit('join', { 
+      authenticateAndJoin(clientSocket, { 
         username: 'testUser', 
         room: 'testRoom',
         publicKey: 'testPublicKey'
@@ -251,55 +362,77 @@ describe('Socket.IO Integration Tests', () => {
     });
 
     it('should handle duplicate usernames in same room', (done) => {
-      clientSocket.emit('join', { 
+      authenticateAndJoin(clientSocket, { 
         username: 'testUser', 
         room: 'testRoom',
         publicKey: 'testPublicKey'
       }, () => {
-        // First user joined successfully
-        clientSocket2.emit('join', { 
-          username: 'testUser', 
-          room: 'testRoom',
-          publicKey: 'testPublicKey2'
-        }, (response) => {
-          expect(response).toBe('Username already taken');
-          done();
+        // First user authenticated and joined successfully
+        clientSocket2.emit('authenticate', 'valid-test-token', (authResponse) => {
+          if (authResponse.success) {
+            clientSocket2.emit('join', { 
+              username: 'testUser', 
+              room: 'testRoom',
+              publicKey: 'testPublicKey2'
+            }, (response) => {
+              expect(response).toBe('Username already taken');
+              done();
+            });
+          }
         });
       });
     });
 
     it('should allow same username in different rooms', (done) => {
-      clientSocket.emit('join', { 
+      authenticateAndJoin(clientSocket, { 
         username: 'testUser', 
         room: 'room1',
         publicKey: 'testPublicKey'
       });
 
-      clientSocket2.emit('join', { 
-        username: 'testUser', 
-        room: 'room2',
-        publicKey: 'testPublicKey2'
-      }, (response) => {
-        expect(response).toBeUndefined(); // No error means success
-        done();
+      clientSocket2.emit('authenticate', 'valid-test-token', (authResponse) => {
+        if (authResponse.success) {
+          clientSocket2.emit('join', { 
+            username: 'testUser', 
+            room: 'room2',
+            publicKey: 'testPublicKey2'
+          }, (response) => {
+            expect(response).toBeUndefined(); // No error means success
+            done();
+          });
+        }
       });
     });
   });
 
   describe('Message Broadcasting', () => {
     beforeEach((done) => {
-      clientSocket.emit('join', { 
-        username: 'user1', 
-        room: 'testRoom',
-        publicKey: 'testPublicKey1'
+      let joinCount = 0;
+      const checkBothJoined = () => {
+        joinCount++;
+        if (joinCount === 2) {
+          done();
+        }
+      };
+
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse1) => {
+        if (authResponse1.success) {
+          clientSocket.emit('join', { 
+            username: 'user1', 
+            room: 'testRoom',
+            publicKey: 'testPublicKey1'
+          }, checkBothJoined);
+        }
       });
 
-      clientSocket2.emit('join', { 
-        username: 'user2', 
-        room: 'testRoom',
-        publicKey: 'testPublicKey2'
-      }, () => {
-        done();
+      clientSocket2.emit('authenticate', 'valid-test-token', (authResponse2) => {
+        if (authResponse2.success) {
+          clientSocket2.emit('join', { 
+            username: 'user2', 
+            room: 'testRoom',
+            publicKey: 'testPublicKey2'
+          }, checkBothJoined);
+        }
       });
     });
 
@@ -336,44 +469,52 @@ describe('Socket.IO Integration Tests', () => {
 
     it('should not receive messages from other rooms', (done) => {
       // Join user1 to testRoom
-      clientSocket.emit('join', { 
-        username: 'user1', 
-        room: 'testRoom',
-        publicKey: 'testPublicKey1'
-      }, () => {
-        // User1 joined testRoom, now join user3 to otherRoom
-        const clientSocket3 = new Client(`http://localhost:${port}`);
-        
-        clientSocket3.on('connect', () => {
-          clientSocket3.emit('join', { 
-            username: 'user3', 
-            room: 'otherRoom',
-            publicKey: 'testPublicKey3'
-          });
-
-          let messageReceived = false;
-          clientSocket3.on('message', (message) => {
-            // Messages like welcome and joins are OK, but encrypted messages should not arrive
-            if (message.isEncrypted) {
-              messageReceived = true;
-            }
-          });
-
-          // Wait for client3 to join, then send message from user1 in testRoom
-          setTimeout(() => {
-            clientSocket.emit('sendMessage', 'encryptedMessage123');
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse1) => {
+        if (authResponse1.success) {
+          clientSocket.emit('join', { 
+            username: 'user1', 
+            room: 'testRoom',
+            publicKey: 'testPublicKey1'
+          }, () => {
+            // User1 joined testRoom, now join user3 to otherRoom
+            const clientSocket3 = new Client(`http://localhost:${port}`);
             
-            // If no encrypted message received within 200ms, test passes
-            setTimeout(() => {
-              clientSocket3.close();
-              if (!messageReceived) {
-                done();
-              } else {
-                done(new Error('User in different room received encrypted message'));
-              }
-            }, 200);
-          }, 100);
-        });
+            clientSocket3.on('connect', () => {
+              clientSocket3.emit('authenticate', 'valid-test-token', (authResponse3) => {
+                if (authResponse3.success) {
+                  clientSocket3.emit('join', { 
+                    username: 'user3', 
+                    room: 'otherRoom',
+                    publicKey: 'testPublicKey3'
+                  });
+
+                  let messageReceived = false;
+                  clientSocket3.on('message', (message) => {
+                    // Messages like welcome and joins are OK, but encrypted messages should not arrive
+                    if (message.isEncrypted) {
+                      messageReceived = true;
+                    }
+                  });
+
+                  // Wait for client3 to join, then send message from user1 in testRoom
+                  setTimeout(() => {
+                    clientSocket.emit('sendMessage', 'encryptedMessage123');
+                    
+                    // If no encrypted message received within 200ms, test passes
+                    setTimeout(() => {
+                      clientSocket3.close();
+                      if (!messageReceived) {
+                        done();
+                      } else {
+                        done(new Error('User in different room received encrypted message'));
+                      }
+                    }, 200);
+                  }, 100);
+                }
+              });
+            });
+          });
+        }
       });
     });
   });
@@ -391,7 +532,7 @@ describe('Socket.IO Integration Tests', () => {
         }
       });
       
-      clientSocket.emit('join', { 
+      authenticateAndJoin(clientSocket, { 
         username: 'user1', 
         room: 'testRoom',
         publicKey: 'testPublicKey1'
@@ -402,32 +543,42 @@ describe('Socket.IO Integration Tests', () => {
 
     it('should update room data when second user joins', (done) => {
       // First user joins
-      clientSocket.emit('join', { 
-        username: 'user1', 
-        room: 'testRoom',
-        publicKey: 'testPublicKey1'
-      }, () => {
-        // First user joined, now set up listener for second user
-        clientSocket2.on('roomData', (data) => {
-          if (data.room === 'testroom' && data.users.length === 2) {
-            expect(data.users.map(u => u.username)).toContain('user1');
-            expect(data.users.map(u => u.username)).toContain('user2');
-            done();
-          }
-        });
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse1) => {
+        if (authResponse1.success) {
+          clientSocket.emit('join', { 
+            username: 'user1', 
+            room: 'testRoom',
+            publicKey: 'testPublicKey1'
+          }, () => {
+            // First user joined, now set up listener for second user
+            clientSocket2.on('roomData', (data) => {
+              if (data.room === 'testroom' && data.users.length === 2) {
+                expect(data.users.map(u => u.username)).toContain('user1');
+                expect(data.users.map(u => u.username)).toContain('user2');
+                done();
+              }
+            });
 
-        // Now second user joins
-        clientSocket2.emit('join', { 
-          username: 'user2', 
-          room: 'testRoom',
-          publicKey: 'testPublicKey2'
-        });
+            // Now second user joins
+            clientSocket2.emit('authenticate', 'valid-test-token', (authResponse2) => {
+              if (authResponse2.success) {
+                clientSocket2.emit('join', { 
+                  username: 'user2', 
+                  room: 'testRoom',
+                  publicKey: 'testPublicKey2'
+                });
+              }
+            });
+          });
+        }
       });
     });
 
     it('should update room data when user disconnects', (done) => {
       // First user joins
-      clientSocket.emit('join', { 
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse1) => {
+        if (authResponse1.success) {
+          clientSocket.emit('join', { 
         username: 'user1', 
         room: 'testRoom',
         publicKey: 'testPublicKey1'
@@ -441,15 +592,21 @@ describe('Socket.IO Integration Tests', () => {
         });
 
         // Second user joins then disconnects
-        clientSocket2.emit('join', { 
-          username: 'user2', 
-          room: 'testRoom',
-          publicKey: 'testPublicKey2'
-        }, () => {
-          setTimeout(() => {
-            clientSocket2.close();
-          }, 100);
+        clientSocket2.emit('authenticate', 'valid-test-token', (authResponse2) => {
+          if (authResponse2.success) {
+            clientSocket2.emit('join', { 
+              username: 'user2', 
+              room: 'testRoom',
+              publicKey: 'testPublicKey2'
+            }, () => {
+              setTimeout(() => {
+                clientSocket2.close();
+              }, 100);
+            });
+          }
         });
+      });
+        }
       });
     });
   });
@@ -461,7 +618,7 @@ describe('Socket.IO Integration Tests', () => {
         done();
       });
 
-      clientSocket.emit('join', { 
+      authenticateAndJoin(clientSocket, { 
         username: 'user1', 
         room: 'testRoom',
         publicKey: 'testPublicKey1'
@@ -480,17 +637,25 @@ describe('Socket.IO Integration Tests', () => {
         });
 
         // First user joins
-        clientSocket.emit('join', { 
-          username: 'user1', 
-          room: 'testRoom',
-          publicKey: 'testPublicKey1'
-        }, () => {
-          // First user joined, now second user joins
-          clientSocket2.emit('join', { 
-            username: 'user2', 
-            room: 'testRoom',
-            publicKey: 'testPublicKey2'
-          });
+        clientSocket.emit('authenticate', 'valid-test-token', (authResponse1) => {
+          if (authResponse1.success) {
+            clientSocket.emit('join', { 
+              username: 'user1', 
+              room: 'testRoom',
+              publicKey: 'testPublicKey1'
+            }, () => {
+              // First user joined, now second user joins
+              clientSocket2.emit('authenticate', 'valid-test-token', (authResponse2) => {
+                if (authResponse2.success) {
+                  clientSocket2.emit('join', { 
+                    username: 'user2', 
+                    room: 'testRoom',
+                    publicKey: 'testPublicKey2'
+                  });
+                }
+              });
+            });
+          }
         });
       }, 50);
     });
@@ -499,73 +664,99 @@ describe('Socket.IO Integration Tests', () => {
       let receivedKeys = 0;
       
       // First user joins
-      clientSocket.emit('join', { 
-        username: 'user1', 
-        room: 'testRoom',
-        publicKey: 'testPublicKey1'
-      }, () => {
-        // Set up listeners for both users
-        clientSocket.on('userPublicKey', (data) => {
-          if (data.username === 'user2') {
-            expect(data.publicKey).toBe('testPublicKey2');
-            receivedKeys++;
-            if (receivedKeys === 2) done();
-          }
-        });
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse1) => {
+        if (authResponse1.success) {
+          clientSocket.emit('join', { 
+            username: 'user1', 
+            room: 'testRoom',
+            publicKey: 'testPublicKey1'
+          }, () => {
+            // Set up listeners for both users
+            clientSocket.on('userPublicKey', (data) => {
+              if (data.username === 'user2') {
+                expect(data.publicKey).toBe('testPublicKey2');
+                receivedKeys++;
+                if (receivedKeys === 2) done();
+              }
+            });
 
-        clientSocket2.on('userPublicKey', (data) => {
-          if (data.username === 'user1') {
-            expect(data.publicKey).toBe('testPublicKey1');
-            receivedKeys++;
-            if (receivedKeys === 2) done();
-          }
-        });
+            clientSocket2.on('userPublicKey', (data) => {
+              if (data.username === 'user1') {
+                expect(data.publicKey).toBe('testPublicKey1');
+                receivedKeys++;
+                if (receivedKeys === 2) done();
+              }
+            });
 
-        // Second user joins
-        clientSocket2.emit('join', { 
-          username: 'user2', 
-          room: 'testRoom',
-          publicKey: 'testPublicKey2'
-        });
+            // Second user joins
+            clientSocket2.emit('authenticate', 'valid-test-token', (authResponse2) => {
+              if (authResponse2.success) {
+                clientSocket2.emit('join', { 
+                  username: 'user2', 
+                  room: 'testRoom',
+                  publicKey: 'testPublicKey2'
+                }, () => {
+                  // Join completed, listeners are set up above
+                });
+              }
+            });
+          });
+        }
       });
     });
   });
 
   describe('Error Handling', () => {
-    it('should handle missing username', (done) => {
-      clientSocket.emit('join', { 
-        room: 'testRoom',
-        publicKey: 'testPublicKey'
-      }, (response) => {
-        expect(response).toBe('Username and room are required');
-        done();
+    it('should handle missing room', (done) => {
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse) => {
+        if (authResponse.success) {
+          clientSocket.emit('join', { 
+            publicKey: 'testPublicKey'
+            // room is missing
+          }, (response) => {
+            expect(response).toBe('Username and room are required');
+            done();
+          });
+        }
       });
     });
 
     it('should handle missing room', (done) => {
-      clientSocket.emit('join', { 
-        username: 'testUser',
-        publicKey: 'testPublicKey'
-      }, (response) => {
-        expect(response).toBe('Username and room are required');
-        done();
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse) => {
+        if (authResponse.success) {
+          clientSocket.emit('join', { 
+            username: 'testUser',
+            publicKey: 'testPublicKey'
+          }, (response) => {
+            expect(response).toBe('Username and room are required');
+            done();
+          });
+        }
       });
     });
 
     it('should handle send message without joining', (done) => {
-      clientSocket.emit('sendMessage', { encrypted: 'abc123', nonce: 'def456' }, (response) => {
-        expect(response).toBe('User not found');
-        done();
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse) => {
+        if (authResponse.success) {
+          clientSocket.emit('sendMessage', { encrypted: 'abc123', nonce: 'def456' }, (response) => {
+            expect(response).toBe('User not found');
+            done();
+          });
+        }
       });
     });
 
     it('should handle send location without joining', (done) => {
-      clientSocket.emit('sendLocation', { 
-        latitude: 40.7128, 
-        longitude: -74.0060 
-      }, (response) => {
-        expect(response).toBe('User not found');
-        done();
+      clientSocket.emit('authenticate', 'valid-test-token', (authResponse) => {
+        if (authResponse.success) {
+          clientSocket.emit('sendLocation', { 
+            latitude: 40.7128, 
+            longitude: -74.0060 
+          }, (response) => {
+            expect(response).toBe('User not found');
+            done();
+          });
+        }
       });
     });
   });
