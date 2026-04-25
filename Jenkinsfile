@@ -59,7 +59,7 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh 'sleep 10'
-                sh 'docker exec chit-chat-chit-chat-1 curl -f http://localhost:3000/health || exit 1'
+                sh 'docker exec chit-chat-chit-chat-1 wget -f http://localhost:3000/health || exit 1'
             }
         }
     }
