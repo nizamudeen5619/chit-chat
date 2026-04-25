@@ -39,7 +39,7 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                     sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
                     sh "docker push ${DOCKER_IMAGE}:latest"
                 }
@@ -49,24 +49,23 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh """
-                    docker stop chit-chat || true
-                    docker rm chit-chat || true
-                    docker pull ${DOCKER_IMAGE}:latest
-                    docker run -d --name chit-chat -p 3000:3000 --restart always ${DOCKER_IMAGE}:latest
+                    docker compose down || true
+                    docker compose pull
+                    docker compose up -d
                 """
             }
         }
 
         stage('Health Check') {
             steps {
-                sh 'sleep 5'
+                sh 'sleep 10'
                 sh 'curl -f http://host.docker.internal:3000/health || exit 1'
             }
         }
     }
 
     post {
-        success { echo 'Deployment successful!' }
-        failure  { echo 'Deployment failed!' }
+        success { echo 'Deployment successful! ✅' }
+        failure  { echo 'Deployment failed! ❌' }
     }
 }
