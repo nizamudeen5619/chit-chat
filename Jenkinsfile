@@ -60,7 +60,10 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh 'sleep 5'
-                sh 'curl -f http://localhost:3000/health || exit 1'
+                sh '''
+                    CONTAINER_IP=$(docker inspect -f "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}" chit-chat)
+                    curl -f http://$CONTAINER_IP:3000/health || exit 1
+                '''
             }
         }
     }
