@@ -1,10 +1,5 @@
 pipeline {
-    agent {
-        docker {
-            image 'node:18-alpine'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+    agent any
 
     environment {
         DOCKER_IMAGE = 'berserker619/main-api'
@@ -22,6 +17,9 @@ pipeline {
         }
 
         stage('Install') {
+            agent {
+                docker { image 'node:20-alpine' }
+            }
             steps {
                 sh 'npm install'
             }
