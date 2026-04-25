@@ -25,6 +25,15 @@ pipeline {
             }
         }
 
+        stage('Test') {
+            agent {
+                docker { image 'node:20-alpine' }
+            }
+            steps {
+                sh 'npm test -- --watchAll=false --forceExit'
+            }
+        }
+
         stage('Docker Build') {
             steps {
                 sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
@@ -65,7 +74,14 @@ pipeline {
     }
 
     post {
-        success { echo 'Deployment successful! ✅' }
-        failure  { echo 'Deployment failed! ❌' }
+        success {
+            echo 'Deployment successful! ✅'
+        }
+        failure {
+            echo 'Deployment failed! ❌'
+        }
+        always {
+            echo "Build #${BUILD_NUMBER} completed"
+        }
     }
 }
