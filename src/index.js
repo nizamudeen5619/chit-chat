@@ -21,7 +21,7 @@ app.use(helmet());
 
 // CORS middleware
 app.use(cors({
-    origin: "http://localhost:4200",
+    origin: process.env.CORS_ORIGIN || "http://localhost:4200",
     methods: ["GET", "POST"],
     credentials: true
 }));
@@ -57,7 +57,7 @@ const server = http.createServer(app);
 const io = socketio(server, {
     // Socket.IO options with CORS and logging
     cors: {
-        origin: "http://localhost:4200",
+        origin: process.env.CORS_ORIGIN || "http://localhost:4200",
         methods: ["GET", "POST"]
     },
     transports: ['websocket', 'polling'],
@@ -402,6 +402,11 @@ cleanupOldRooms();
 // Schedule cleanup to run every 24 hours (86400000 ms)
 const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 setInterval(cleanupOldRooms, CLEANUP_INTERVAL);
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 server.listen(port, () => {
     const timestamp = new Date().toISOString();
