@@ -53,7 +53,7 @@ const verifyRefreshToken = async (req, res, next) => {
     }
 
     // Basic verification of refresh token format
-    const decoded = AuthService.verifyAccessToken(refreshToken);
+    const decoded = AuthService.verifyRefreshToken(refreshToken);
     
     if (!decoded || decoded.type !== 'refresh') {
       return res.status(401).json({ 

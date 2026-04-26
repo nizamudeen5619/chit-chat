@@ -1,7 +1,7 @@
 const users = [];
 
 // Add User 
-const addUser = ({ id, username, room }) => {
+const addUser = ({ id, socketId, username, room }) => {
 
     // Validate data
     if (!username || !room) {
@@ -27,14 +27,14 @@ const addUser = ({ id, username, room }) => {
     }
 
     // Store user
-    const user = { id, username, room };
+    const user = { id, socketId, username, room };
     users.push(user);
     return { user };
 };
 
 // Remove User 
 const removeUser = (id) => {
-    const index = users.findIndex((user) => user.id === id);
+    const index = users.findIndex((user) => user.id === id || user.socketId === id);
 
     if (index !== -1) {
         return users.splice(index, 1)[0];
@@ -45,7 +45,7 @@ const removeUser = (id) => {
 
 // Get User 
 const getUser = (id) => {
-    return users.find((user) => user.id === id);
+    return users.find((user) => user.id === id || user.socketId === id);
 };
 
 // Get Users in Room (SAFE VERSION)

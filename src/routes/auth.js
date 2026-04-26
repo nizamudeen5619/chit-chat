@@ -8,6 +8,23 @@ const router = express.Router();
 // Rate limiting for auth endpoints
 const authRateLimit = rateLimitSensitive(5, 15 * 60 * 1000); // 5 attempts per 15 minutes
 
+const getRefreshCookieOptions = (maxAgeMs) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const sameSite = isProduction ? 'none' : 'strict';
+
+  // For cross-origin cookie support in production:
+  // - SameSite=None requires Secure=true (HTTPS).
+  const secure = sameSite === 'none' ? true : isProduction;
+
+  return {
+    httpOnly: true,
+    secure,
+    sameSite,
+    maxAge: maxAgeMs,
+    path: '/'
+  };
+};
+
 // Register user
 router.post('/register', authRateLimit, validateOrigin, async (req, res) => {
   try {
@@ -150,13 +167,7 @@ router.post('/login', authRateLimit, validateOrigin, async (req, res) => {
     }, deviceInfo);
 
     // Set refresh token in HTTPOnly cookie
-    res.cookie('refreshToken', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: tokens.refreshTokenExpiresIn,
-      path: '/'
-    });
+    res.cookie('refreshToken', tokens.refreshToken, getRefreshCookieOptions(tokens.refreshTokenExpiresIn));
 
     res.json({
       accessToken: tokens.accessToken,
@@ -201,13 +212,7 @@ router.post('/refresh', verifyRefreshToken, validateOrigin, async (req, res) => 
     }
 
     // Set new refresh token in HTTPOnly cookie
-    res.cookie('refreshToken', newTokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: newTokens.refreshTokenExpiresIn,
-      path: '/'
-    });
+    res.cookie('refreshToken', newTokens.refreshToken, getRefreshCookieOptions(newTokens.refreshTokenExpiresIn));
 
     res.json({
       accessToken: newTokens.accessToken,
@@ -238,7 +243,7 @@ router.post('/logout', authenticateToken, validateOrigin, async (req, res) => {
     res.clearCookie('refreshToken', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       path: '/'
     });
 
@@ -265,7 +270,7 @@ router.post('/logout-all', authenticateToken, requireActiveUser, validateOrigin,
     res.clearCookie('refreshToken', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       path: '/'
     });
 
@@ -441,7 +446,7 @@ router.put('/password', authenticateToken, requireActiveUser, authRateLimit, val
     res.clearCookie('refreshToken', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       path: '/'
     });
 

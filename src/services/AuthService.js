@@ -94,6 +94,24 @@ class AuthService {
     }
   }
 
+  verifyRefreshToken(token) {
+    try {
+      const decoded = jwt.verify(token, this.refreshTokenSecret, {
+        issuer: 'chit-chat',
+        audience: 'chit-chat-users'
+      });
+
+      if (decoded.type !== 'refresh') {
+        return null;
+      }
+
+      return decoded;
+    } catch (error) {
+      console.error('Refresh token verification failed:', error.message);
+      return null;
+    }
+  }
+
   async refreshAccessToken(refreshToken, deviceInfo = {}) {
     try {
       // Verify refresh token

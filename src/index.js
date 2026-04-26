@@ -4,6 +4,7 @@ const Filter = require('bad-words');
 const http = require('http');
 const helmet = require('helmet');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const AuthService = require('./services/AuthService');
 const authRoutes = require('./routes/auth');
@@ -20,14 +21,29 @@ const app = express();
 app.use(helmet());
 
 // CORS middleware
+const parseAllowedOrigins = () => {
+    const raw = process.env.CORS_ORIGIN || process.env.ALLOWED_ORIGINS || "http://localhost:4200";
+    return raw.split(',').map(o => o.trim()).filter(Boolean);
+};
+
+const allowedOrigins = parseAllowedOrigins();
+
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:4200",
-    methods: ["GET", "POST"],
+    origin: (origin, callback) => {
+        // Allow non-browser clients and same-origin requests
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error('CORS origin not allowed'), false);
+    },
+    methods: ["GET", "POST", "PUT"],
     credentials: true
 }));
 
 // Body parser middleware
 app.use(express.json());
+
+// Cookie parser (required for refresh-cookie auth)
+app.use(cookieParser());
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -57,8 +73,9 @@ const server = http.createServer(app);
 const io = socketio(server, {
     // Socket.IO options with CORS and logging
     cors: {
-        origin: process.env.CORS_ORIGIN || "http://localhost:4200",
-        methods: ["GET", "POST"]
+        origin: allowedOrigins,
+        methods: ["GET", "POST", "PUT"],
+        credentials: true
     },
     transports: ['websocket', 'polling'],
     logLevel: 'debug'
